@@ -149,7 +149,9 @@ class MultiTableDataLoader:
             dataset, 
             batch_size=batch_size, 
             shuffle=shuffle,
-            collate_fn=self._collate_enhanced_batch
+            collate_fn=self._collate_enhanced_batch,
+            num_workers=4,  # Start with 2, can increase if CPU is not a bottleneck
+            pin_memory=True # Improves data transfer speed to GPU
         )
     
     def _collate_enhanced_batch(self, batch):

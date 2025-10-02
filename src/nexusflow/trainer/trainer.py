@@ -149,7 +149,6 @@ class Trainer:
         # Initialize model with preprocessing-aware architecture
         self._initialize_preprocessing_aware_model()
         
-        # Setup optimizer
         self._setup_optimizer()
         
         # Log comprehensive model statistics

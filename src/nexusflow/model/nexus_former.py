@@ -58,6 +58,12 @@ class MoELayer(nn.Module):
         
         return output
 
+try:
+    from torch.nn.functional import scaled_dot_product_attention
+    FLASH_ATTN_AVAILABLE = True
+except ImportError:
+    FLASH_ATTN_AVAILABLE = False
+
 class FlashAttention(nn.Module):
     """Efficient attention implementation with tiling optimization."""
     
@@ -84,15 +90,18 @@ class FlashAttention(nn.Module):
         q, k, v = [tensor.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2) 
                    for tensor in qkv]
         
-        # For small sequences, use standard attention
-        if seq_len <= self.block_size:
-            scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
-            attn_weights = F.softmax(scores, dim=-1)
-            attn_weights = self.dropout(attn_weights)
-            out = torch.matmul(attn_weights, v)
+        if FLASH_ATTN_AVAILABLE:
+            out = scaled_dot_product_attention(q, k, v, is_causal=False, dropout_p=self.dropout.p if self.training else 0.0)
         else:
-            # Tiled attention for memory efficiency
-            out = self._tiled_attention(q, k, v)
+        # For small sequences, use standard attention
+            if seq_len <= self.block_size:
+                scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+                attn_weights = F.softmax(scores, dim=-1)
+                attn_weights = self.dropout(attn_weights)
+                out = torch.matmul(attn_weights, v)
+            else:
+                # Tiled attention for memory efficiency
+                out = self._tiled_attention(q, k, v)
         
         # Reshape and project output
         out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)

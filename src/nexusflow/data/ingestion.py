@@ -173,6 +173,15 @@ def align_relational_data(datasets: Dict[str, pd.DataFrame], cfg: ConfigModel) -
     logger.info(f"   Total row expansions: {total_expansions}")
     logger.info(f"   Target table final size: {len(aligned_tables[target_table_name])}")
     logger.info(f"   Aligned tables: {list(aligned_tables.keys())}")
+
+    # NEW: Pre-compute hashes for all key columns
+    logger.info("Pre-computing numerical hashes for key columns...")
+    for col in key_map_df.columns:
+        if key_map_df[col].dtype == 'object':
+            # Use a vectorized approach for speed
+            key_map_df[col] = key_map_df[col].apply(lambda x: hash(str(x)) % (2**31))
+
+    logger.info("🎯 Relational alignment complete.")
     
     return AlignedData(
         aligned_tables=aligned_tables,
@@ -187,126 +196,6 @@ def align_relational_data(datasets: Dict[str, pd.DataFrame], cfg: ConfigModel) -
             'alignment_mode': 'multi_table_preserved'
         }
     )
-
-def _perform_expansion_join(base_df: pd.DataFrame, join_df: pd.DataFrame, 
-                           fk_config: 'ForeignKeyConfig', join_table_name: str) -> Tuple[pd.DataFrame, Dict]:
-    """
-    Perform a join that expands the base table for one-to-many relationships.
-    
-    Returns:
-        Tuple of (expanded_dataframe, join_statistics)
-    """
-    # Extract join columns
-    fk_cols = fk_config.columns if isinstance(fk_config.columns, list) else [fk_config.columns]
-    ref_cols = fk_config.references_columns if isinstance(fk_config.references_columns, list) else [fk_config.references_columns]
-    
-    # Detect relationship cardinality
-    base_key_counts = base_df[ref_cols].value_counts()
-    join_key_counts = join_df[fk_cols].value_counts()
-    
-    is_one_to_many = any(join_key_counts > 1)
-    
-    if is_one_to_many:
-        # One-to-many: Expand base table by duplicating rows
-        logger.debug(f"One-to-many join detected for {join_table_name}")
-        
-        # Perform left join which will naturally duplicate base rows
-        expanded_df = base_df.merge(
-            join_df,
-            left_on=ref_cols,
-            right_on=fk_cols,
-            how='left',
-            suffixes=('', f'_from_{join_table_name}')
-        )
-        
-        # Count expansions
-        original_rows = len(base_df)
-        final_rows = len(expanded_df)
-        expansions = final_rows - original_rows
-        
-        join_stats = {
-            'join_type': 'one_to_many',
-            'expansions': expansions,
-            'original_base_rows': original_rows,
-            'final_rows': final_rows
-        }
-    else:
-        # One-to-one: No expansion needed
-        logger.debug(f"One-to-one join detected for {join_table_name}")
-        
-        expanded_df = base_df.merge(
-            join_df,
-            left_on=ref_cols,
-            right_on=fk_cols,
-            how='left',
-            suffixes=('', f'_from_{join_table_name}')
-        )
-        
-        join_stats = {
-            'join_type': 'one_to_one',
-            'expansions': 0,
-            'original_base_rows': len(base_df),
-            'final_rows': len(expanded_df)
-        }
-    
-    return expanded_df, join_stats
-
-def _update_key_mapping(key_map_data: List[Dict], expanded_df: pd.DataFrame, 
-                       table_name: str, dataset_config: 'DatasetConfig'):
-    """Update key mapping with new table's primary keys."""
-    pk = dataset_config.primary_key
-    pk_cols = pk if isinstance(pk, list) else [pk]
-    
-    # Create a mapping from global_id to the new table's keys
-    global_id_to_keys = {}
-    
-    for _, row in expanded_df.iterrows():
-        global_id = row['global_id']
-        if global_id not in global_id_to_keys:
-            global_id_to_keys[global_id] = []
-        
-        # Store this row's keys from the joined table
-        row_keys = {}
-        for pk_col in pk_cols:
-            col_name = f'{table_name}_{pk_col}'
-            if col_name in row or pk_col in row:
-                row_keys[f'{table_name}_{pk_col}'] = row.get(col_name, row.get(pk_col))
-        
-        if row_keys:  # Only add if we found valid keys
-            global_id_to_keys[global_id].append(row_keys)
-    
-    # Update the key_map_data with the new keys
-    for entry in key_map_data:
-        global_id = entry['global_id']
-        if global_id in global_id_to_keys:
-            # For now, take the first set of keys (could be enhanced later)
-            keys = global_id_to_keys[global_id][0] if global_id_to_keys[global_id] else {}
-            entry.update(keys)
-
-def _build_join_dependency_graph(datasets_config: List['DatasetConfig']) -> Dict[str, List[str]]:
-    """Build dependency graph for determining join order."""
-    graph = {}
-    
-    for dataset in datasets_config:
-        graph[dataset.name] = []
-        if dataset.foreign_keys:
-            for fk in dataset.foreign_keys:
-                graph[dataset.name].append(fk.references_table)
-    
-    return graph
-
-def _determine_join_order(graph: Dict[str, List[str]], target_table: str) -> List[str]:
-    """Determine optimal join order using topological sort."""
-    # Simple implementation: tables with no dependencies first
-    no_deps = [table for table, deps in graph.items() if not deps]
-    has_deps = [table for table, deps in graph.items() if deps]
-    
-    # Ensure target table is first
-    join_order = [target_table] if target_table in no_deps else []
-    join_order.extend([t for t in no_deps if t != target_table])
-    join_order.extend(has_deps)
-    
-    return join_order
 
 def _create_fallback_aligned_data(datasets: Dict[str, pd.DataFrame]) -> AlignedData:
     """Fallback for synthetic data or simple cases."""
