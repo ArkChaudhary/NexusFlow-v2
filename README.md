@@ -113,7 +113,7 @@ pruned_model = optimize_model(model, method='pruning', amount=0.3)
 ## Quick Start
 
 ### 🟢 Easiest: Run on Google Colab  
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ArkChaudhary/NexusFlow/blob/main/demo.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ArkChaudhary/NexusFlow-v2/blob/main/demo.ipynb)
 
 ### Installation & Setup
 
